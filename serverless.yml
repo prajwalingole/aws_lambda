@@ -1,0 +1,84 @@
+service: sls-sqs-dynamodb-project
+
+frameworkVersion: '3'
+
+custom: 
+  settings:
+    ACCOUNT_ID: "754104204008"
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  region: us-east-1
+  environment: ${self:custom.settings}
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "sqs:*"
+      Resource: "*"
+    - Effect: "Allow"
+      Action:
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+      Resource: "*"
+
+	
+functions:
+  sendmsg:
+    handler: producer.sendmsg
+    events:
+      - http:
+          path: /produce
+          method: post
+  recievemsg:
+    handler: consumer.recievemsg
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - SqsQueue
+              - Arn
+          batchsize: 10
+        
+  failedMsgs:
+    handler: DynamodbSaver.failedMsgs
+    events:
+      - sqs: 
+          arn:
+            Fn::GetAtt:
+              - DlqSqsQueue
+              - Arn
+
+	
+resources:
+  Resources:
+    SqsQueue:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        RedrivePolicy:
+          deadLetterTargetArn: arn:aws:sqs:us-east-1:754104204008:DlqSqsQueue
+          maxReceiveCount: 3
+        QueueName: "SqsQueue"
+
+    DlqSqsQueue:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: "DlqSqsQueue"
+
+
+    DLQTable: 
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: "id"
+            AttributeType: "S"
+        BillingMode: PAY_PER_REQUEST
+        KeySchema:
+          - AttributeName: "id"
+            KeyType: "HASH"
+        TableName: DynamodbTable 
+
+plugins:
+  - serverless-offline
